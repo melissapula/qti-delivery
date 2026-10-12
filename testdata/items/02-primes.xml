@@ -1,0 +1,25 @@
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqtiasi_v3p0"
+    identifier="primes" title="Prime Numbers" adaptive="false" time-dependent="false">
+  <qti-response-declaration identifier="RESPONSE" cardinality="multiple" base-type="identifier">
+    <qti-correct-response>
+      <qti-value>A</qti-value><qti-value>C</qti-value><qti-value>D</qti-value>
+    </qti-correct-response>
+    <qti-mapping lower-bound="0" upper-bound="3" default-value="0">
+      <qti-map-entry map-key="A" mapped-value="1"/>
+      <qti-map-entry map-key="B" mapped-value="-1"/>
+      <qti-map-entry map-key="C" mapped-value="1"/>
+      <qti-map-entry map-key="D" mapped-value="1"/>
+    </qti-mapping>
+  </qti-response-declaration>
+  <qti-outcome-declaration identifier="SCORE" cardinality="single" base-type="float"/>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="RESPONSE" max-choices="0">
+      <qti-prompt>Select all of the prime numbers.</qti-prompt>
+      <qti-simple-choice identifier="A">2</qti-simple-choice>
+      <qti-simple-choice identifier="B">9</qti-simple-choice>
+      <qti-simple-choice identifier="C">11</qti-simple-choice>
+      <qti-simple-choice identifier="D">13</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+  <qti-response-processing template="https://purl.imsglobal.org/spec/qti/v3p0/rptemplates/map_response.xml"/>
+</qti-assessment-item>

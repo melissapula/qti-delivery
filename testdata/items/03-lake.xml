@@ -1,0 +1,17 @@
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqtiasi_v3p0"
+    identifier="lake-source" title="Headwaters" adaptive="false" time-dependent="false">
+  <qti-response-declaration identifier="RESPONSE" cardinality="single" base-type="string">
+    <qti-correct-response><qti-value>Itasca</qti-value></qti-correct-response>
+    <qti-mapping default-value="0">
+      <qti-map-entry map-key="Itasca" mapped-value="1" case-sensitive="false"/>
+      <qti-map-entry map-key="Lake Itasca" mapped-value="1" case-sensitive="false"/>
+    </qti-mapping>
+  </qti-response-declaration>
+  <qti-outcome-declaration identifier="SCORE" cardinality="single" base-type="float"/>
+  <qti-item-body>
+    <p>The Mississippi River begins at Lake
+      <qti-text-entry-interaction response-identifier="RESPONSE" expected-length="15"/>
+      in northern Minnesota.</p>
+  </qti-item-body>
+  <qti-response-processing template="https://purl.imsglobal.org/spec/qti/v3p0/rptemplates/map_response.xml"/>
+</qti-assessment-item>

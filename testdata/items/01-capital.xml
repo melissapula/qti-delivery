@@ -1,0 +1,17 @@
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqtiasi_v3p0"
+    identifier="capital-mn" title="State Capital" adaptive="false" time-dependent="false">
+  <qti-response-declaration identifier="RESPONSE" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>B</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-outcome-declaration identifier="SCORE" cardinality="single" base-type="float"/>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="RESPONSE" max-choices="1">
+      <qti-prompt>What is the capital of Minnesota?</qti-prompt>
+      <qti-simple-choice identifier="A">Minneapolis</qti-simple-choice>
+      <qti-simple-choice identifier="B">Saint Paul</qti-simple-choice>
+      <qti-simple-choice identifier="C">Duluth</qti-simple-choice>
+      <qti-simple-choice identifier="D">Bemidji</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+  <qti-response-processing template="https://purl.imsglobal.org/spec/qti/v3p0/rptemplates/match_correct.xml"/>
+</qti-assessment-item>

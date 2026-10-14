@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -555,5 +556,89 @@ func TestItems(t *testing.T) {
 
 	if got := s.Items()[0].Identifier; got != "capital-mn" {
 		t.Errorf("after reordering a returned slice, Items()[0] = %q, want %q", got, "capital-mn")
+	}
+}
+
+// TestConcurrentStart starts many sessions at once. Run it with -race: a
+// missing lock may still pass a plain run.
+func TestConcurrentStart(t *testing.T) {
+	s := newTestStore(t)
+	const n = 100
+
+	var (
+		wg  sync.WaitGroup
+		mu  sync.Mutex // guards ids, which the goroutines share
+		ids = make(map[string]bool)
+	)
+	for range n {
+		wg.Go(func() {
+			got, err := s.Start("cand-1")
+			if err != nil {
+				t.Errorf("Start: %v", err)
+				return
+			}
+			mu.Lock()
+			ids[got.ID] = true
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+
+	if len(ids) != n {
+		t.Errorf("%d distinct IDs from %d starts, want %d", len(ids), n, n)
+	}
+	for id := range ids {
+		if _, err := s.Get(id); err != nil {
+			t.Errorf("Get(%s): %v", id, err)
+		}
+	}
+}
+
+// TestConcurrentAnswerGet answers and reads one session from many goroutines,
+// then submits it while late answers are still arriving. Its job is to give
+// -race reads and writes on the same state.
+func TestConcurrentAnswerGet(t *testing.T) {
+	s := newTestStore(t)
+	started := startAndAnswer(t, s, nil)
+	const n = 50
+
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			if err := s.Answer(started.ID, "capital-mn", qti.Responses{"RESPONSE": {"B"}}); err != nil {
+				t.Errorf("Answer: %v", err)
+			}
+		})
+		wg.Go(func() {
+			if _, err := s.Get(started.ID); err != nil {
+				t.Errorf("Get: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	// Each late answer lands either before the submit or after it, when it
+	// must be refused.
+	for range n {
+		wg.Go(func() {
+			err := s.Answer(started.ID, "primes", qti.Responses{"RESPONSE": {"A", "C", "D"}})
+			if err != nil && !errors.Is(err, ErrAlreadyDone) {
+				t.Errorf("late Answer error = %v, want nil or ErrAlreadyDone", err)
+			}
+		})
+	}
+	wg.Go(func() {
+		if _, err := s.Submit(started.ID); err != nil {
+			t.Errorf("Submit: %v", err)
+		}
+	})
+	wg.Wait()
+
+	got, err := s.Get(started.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != StatusSubmitted {
+		t.Errorf("Status = %q, want %q", got.Status, StatusSubmitted)
 	}
 }

@@ -1,6 +1,7 @@
 package qti
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -506,6 +507,40 @@ func TestScoreErrors(t *testing.T) {
 			}
 			if got != (Result{}) {
 				t.Errorf("Score() = %+v alongside an error, want the zero Result", got)
+			}
+		})
+	}
+}
+
+// TestResultJSON pins the JSON names a submitted session's results use, so
+// renaming a field is a deliberate test change rather than a silent client
+// break.
+func TestResultJSON(t *testing.T) {
+	tests := []struct {
+		name   string
+		result Result
+		want   string
+	}{
+		{
+			name:   "correct",
+			result: Result{ItemIdentifier: "capital-mn", Score: 1, MaxScore: 1, Correct: true},
+			want:   `{"itemIdentifier":"capital-mn","score":1,"maxScore":1,"correct":true}`,
+		},
+		{
+			name:   "partial credit keeps correct false",
+			result: Result{ItemIdentifier: "primes", Score: 2, MaxScore: 3},
+			want:   `{"itemIdentifier":"primes","score":2,"maxScore":3,"correct":false}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.result)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("JSON =\n%s\nwant\n%s", got, tt.want)
 			}
 		})
 	}

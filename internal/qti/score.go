@@ -18,12 +18,13 @@ const (
 // identifier. A single-answer response is a one-element slice.
 type Responses map[string][]string
 
-// Result is the outcome of scoring one item.
+// Result is the outcome of scoring one item. Its JSON names are the ones the
+// API returns in a submitted session's results.
 type Result struct {
-	ItemIdentifier string
-	Score          float64
-	MaxScore       float64
-	Correct        bool
+	ItemIdentifier string  `json:"itemIdentifier"`
+	Score          float64 `json:"score"`
+	MaxScore       float64 `json:"maxScore"`
+	Correct        bool    `json:"correct"`
 }
 
 // Score scores the candidate's responses to the item. An unanswered item

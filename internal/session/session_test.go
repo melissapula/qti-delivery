@@ -67,7 +67,7 @@ func TestSessionJSON(t *testing.T) {
 			},
 			want: `{"id":"abc","candidateId":"cand-1","status":"submitted","startedAt":"2026-10-14T09:00:00Z",` +
 				`"submittedAt":"2026-10-14T09:30:00Z",` +
-				`"results":[{"ItemIdentifier":"capital-mn","Score":1,"MaxScore":1,"Correct":true}],` +
+				`"results":[{"itemIdentifier":"capital-mn","score":1,"maxScore":1,"correct":true}],` +
 				`"score":1,"maxScore":1}`,
 		},
 	}

@@ -162,6 +162,49 @@ func (s *Store) Answer(id, itemID string, r qti.Responses) error {
 	return nil
 }
 
+// Submit scores every item on the form in order, an unanswered item scoring
+// 0, totals the results, and locks the session. It returns ErrNotFound if
+// there is no such session and ErrAlreadyDone if it is already submitted. If
+// an item cannot be scored, it returns that error and leaves the session in
+// progress. Scoring happens under the lock, which is quick for a small form.
+func (s *Store) Submit(id string) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.sessions[id]
+	if !ok {
+		return Session{}, ErrNotFound
+	}
+	if a.session.Status == StatusSubmitted {
+		return Session{}, ErrAlreadyDone
+	}
+
+	// Build everything locally first, so a scoring error changes nothing.
+	results := make([]qti.Result, 0, len(s.items))
+	var score, maxScore float64
+	for _, item := range s.items {
+		result, err := item.Score(a.responses[item.Identifier])
+		if err != nil {
+			return Session{}, fmt.Errorf("session: %w", err)
+		}
+		results = append(results, result)
+		score += result.Score
+		maxScore += result.MaxScore
+	}
+
+	a.session.Results = results
+	a.session.Score = score
+	a.session.MaxScore = maxScore
+	a.session.Status = StatusSubmitted
+	a.session.SubmittedAt = s.now()
+	return a.session.clone(), nil
+}
+
+// Items returns the form's items in order. The slice is a copy, but the items
+// are shared with the store and must not be modified.
+func (s *Store) Items() []*qti.Item {
+	return slices.Clone(s.items)
+}
+
 // Get returns the session with the given ID, or ErrNotFound.
 func (s *Store) Get(id string) (Session, error) {
 	s.mu.RLock()

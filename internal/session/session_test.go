@@ -290,3 +290,270 @@ func TestAnswerAccepts(t *testing.T) {
 		}
 	}
 }
+
+// answer is one call to Answer, for tables that replay several.
+type answer struct {
+	itemID    string
+	responses qti.Responses
+}
+
+// startAndAnswer starts a session and records answers in order, failing the
+// test on any error.
+func startAndAnswer(t *testing.T, s *Store, answers []answer) Session {
+	t.Helper()
+	started, err := s.Start("cand-1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	for _, a := range answers {
+		if err := s.Answer(started.ID, a.itemID, a.responses); err != nil {
+			t.Fatalf("Answer(%s, %v): %v", a.itemID, a.responses, err)
+		}
+	}
+	return started
+}
+
+func TestSubmit(t *testing.T) {
+	allCorrect := []answer{
+		{"capital-mn", qti.Responses{"RESPONSE": {"B"}}},
+		{"primes", qti.Responses{"RESPONSE": {"A", "C", "D"}}},
+		{"lake-source", qti.Responses{"RESPONSE": {"itasca"}}},
+	}
+
+	tests := []struct {
+		name      string
+		answers   []answer
+		want      []qti.Result
+		wantScore float64
+	}{
+		{
+			name:    "all three answered correctly",
+			answers: allCorrect,
+			want: []qti.Result{
+				{ItemIdentifier: "capital-mn", Score: 1, MaxScore: 1, Correct: true},
+				{ItemIdentifier: "primes", Score: 3, MaxScore: 3, Correct: true},
+				{ItemIdentifier: "lake-source", Score: 1, MaxScore: 1, Correct: true},
+			},
+			wantScore: 5,
+		},
+		{
+			name:    "only capital-mn answered",
+			answers: allCorrect[:1],
+			want: []qti.Result{
+				{ItemIdentifier: "capital-mn", Score: 1, MaxScore: 1, Correct: true},
+				{ItemIdentifier: "primes", Score: 0, MaxScore: 3},
+				{ItemIdentifier: "lake-source", Score: 0, MaxScore: 1},
+			},
+			wantScore: 1,
+		},
+		{
+			name: "nothing answered",
+			want: []qti.Result{
+				{ItemIdentifier: "capital-mn", Score: 0, MaxScore: 1},
+				{ItemIdentifier: "primes", Score: 0, MaxScore: 3},
+				{ItemIdentifier: "lake-source", Score: 0, MaxScore: 1},
+			},
+		},
+		{
+			name: "a later answer replaces an earlier one",
+			answers: []answer{
+				{"capital-mn", qti.Responses{"RESPONSE": {"A"}}},
+				{"capital-mn", qti.Responses{"RESPONSE": {"B"}}},
+			},
+			want: []qti.Result{
+				{ItemIdentifier: "capital-mn", Score: 1, MaxScore: 1, Correct: true},
+				{ItemIdentifier: "primes", Score: 0, MaxScore: 3},
+				{ItemIdentifier: "lake-source", Score: 0, MaxScore: 1},
+			},
+			wantScore: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestStore(t)
+			started := startAndAnswer(t, s, tt.answers)
+
+			got, err := s.Submit(started.ID)
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if got.Status != StatusSubmitted {
+				t.Errorf("Status = %q, want %q", got.Status, StatusSubmitted)
+			}
+			if !got.SubmittedAt.Equal(testNow) {
+				t.Errorf("SubmittedAt = %v, want %v", got.SubmittedAt, testNow)
+			}
+			if !reflect.DeepEqual(got.Results, tt.want) {
+				t.Errorf("Results =\n%+v\nwant\n%+v", got.Results, tt.want)
+			}
+			if got.Score != tt.wantScore || got.MaxScore != 5 {
+				t.Errorf("total = %v of %v, want %v of 5", got.Score, got.MaxScore, tt.wantScore)
+			}
+
+			stored, err := s.Get(started.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if !reflect.DeepEqual(stored, got) {
+				t.Errorf("Get after Submit = %+v, want %+v", stored, got)
+			}
+		})
+	}
+}
+
+func TestSubmitErrors(t *testing.T) {
+	t.Run("unknown session", func(t *testing.T) {
+		s := newTestStore(t)
+		if _, err := s.Submit("no-such-session"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Submit error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("submit twice", func(t *testing.T) {
+		s := newTestStore(t)
+		started := startAndAnswer(t, s, nil)
+		if _, err := s.Submit(started.ID); err != nil {
+			t.Fatalf("first Submit: %v", err)
+		}
+		if _, err := s.Submit(started.ID); !errors.Is(err, ErrAlreadyDone) {
+			t.Errorf("second Submit error = %v, want ErrAlreadyDone", err)
+		}
+	})
+
+	t.Run("answer after submit", func(t *testing.T) {
+		s := newTestStore(t)
+		started := startAndAnswer(t, s, nil)
+		if _, err := s.Submit(started.ID); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		err := s.Answer(started.ID, "capital-mn", qti.Responses{"RESPONSE": {"B"}})
+		if !errors.Is(err, ErrAlreadyDone) {
+			t.Errorf("Answer error = %v, want ErrAlreadyDone", err)
+		}
+	})
+}
+
+// TestSubmitScoreErrorLeavesSessionOpen uses an item Score always rejects, so
+// Submit fails part way, and checks the session is not half submitted.
+func TestSubmitScoreErrorLeavesSessionOpen(t *testing.T) {
+	unsupported := &qti.Item{
+		Identifier: "odd-template",
+		ResponseDeclarations: []qti.ResponseDeclaration{
+			{Identifier: "RESPONSE", Cardinality: "single", BaseType: "identifier"},
+		},
+		ResponseProcessing: qti.ResponseProcessing{Template: "map_response_point"},
+	}
+	s := NewStore([]*qti.Item{unsupported})
+	s.now = func() time.Time { return testNow }
+	started, err := s.Start("cand-1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if _, err := s.Submit(started.ID); err == nil {
+		t.Fatal("Submit returned nil error, want the Score error")
+	}
+	got, err := s.Get(started.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !reflect.DeepEqual(got, started) {
+		t.Errorf("after a failed Submit, session = %+v, want it unchanged %+v", got, started)
+	}
+}
+
+// TestRejectedAnswerNotStored checks that an answer Answer rejects does not
+// replace the earlier, valid one.
+func TestRejectedAnswerNotStored(t *testing.T) {
+	s := newTestStore(t)
+	started := startAndAnswer(t, s, []answer{{"capital-mn", qti.Responses{"RESPONSE": {"B"}}}})
+
+	err := s.Answer(started.ID, "capital-mn", qti.Responses{"RESPONSE": {"A", "C"}})
+	if !errors.Is(err, ErrBadResponse) {
+		t.Fatalf("Answer error = %v, want ErrBadResponse", err)
+	}
+	got, err := s.Submit(started.ID)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !got.Results[0].Correct {
+		t.Errorf("capital-mn result = %+v, want the earlier correct answer kept", got.Results[0])
+	}
+}
+
+func TestSubmitStoresCopy(t *testing.T) {
+	s := newTestStore(t)
+	started := startAndAnswer(t, s, nil)
+	r := qti.Responses{"RESPONSE": {"B"}}
+	if err := s.Answer(started.ID, "capital-mn", r); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	r["RESPONSE"][0] = "A" // the caller reuses its slice after answering
+
+	got, err := s.Submit(started.ID)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !got.Results[0].Correct {
+		t.Errorf("capital-mn result = %+v, want it scored on the answer as given", got.Results[0])
+	}
+}
+
+func TestGetReturnsCopy(t *testing.T) {
+	tests := []struct {
+		name string
+		// returned gives the session whose Results the test changes.
+		returned func(s *Store, id string) (Session, error)
+	}{
+		{"from Submit", func(s *Store, id string) (Session, error) { return s.Submit(id) }},
+		{"from Get", func(s *Store, id string) (Session, error) {
+			if _, err := s.Submit(id); err != nil {
+				return Session{}, err
+			}
+			return s.Get(id)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestStore(t)
+			started := startAndAnswer(t, s, []answer{{"capital-mn", qti.Responses{"RESPONSE": {"B"}}}})
+			got, err := tt.returned(s, started.ID)
+			if err != nil {
+				t.Fatalf("setup: %v", err)
+			}
+
+			got.Results[0].Score = 99
+
+			again, err := s.Get(started.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if again.Results[0].Score != 1 {
+				t.Errorf("stored Results[0].Score = %v after changing a returned copy, want 1", again.Results[0].Score)
+			}
+		})
+	}
+}
+
+func TestItems(t *testing.T) {
+	s := newTestStore(t)
+
+	first := s.Items()
+	var ids []string
+	for _, it := range first {
+		ids = append(ids, it.Identifier)
+	}
+	want := []string{"capital-mn", "primes", "lake-source"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("Items identifiers = %v, want %v", ids, want)
+	}
+
+	first[0], first[2] = first[2], first[0]
+
+	if got := s.Items()[0].Identifier; got != "capital-mn" {
+		t.Errorf("after reordering a returned slice, Items()[0] = %q, want %q", got, "capital-mn")
+	}
+}

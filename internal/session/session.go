@@ -5,6 +5,7 @@ package session
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -114,6 +115,51 @@ func (s *Store) Start(candidateID string) (Session, error) {
 	}
 	s.sessions[a.session.ID] = a
 	return a.session.clone(), nil
+}
+
+// cloneResponses returns a copy of r that shares no memory with it. Copying
+// the map alone is not enough: each value is a slice header, so both maps
+// would still point at the same backing arrays.
+func cloneResponses(r qti.Responses) qti.Responses {
+	if r == nil {
+		return nil
+	}
+	out := make(qti.Responses, len(r))
+	for id, values := range r {
+		out[id] = slices.Clone(values)
+	}
+	return out
+}
+
+// Answer records r as the candidate's answer to the item, replacing any
+// earlier answer to it. Items may be answered in any order. It returns
+// ErrUnknownItem if the item is not on the form, ErrBadResponse if the item
+// cannot score r, ErrNotFound if there is no such session, and ErrAlreadyDone
+// if the session is submitted. The item checks come first, so an unknown item
+// on an unknown session reports ErrUnknownItem.
+func (s *Store) Answer(id, itemID string, r qti.Responses) error {
+	// The items never change after NewStore, so they need no lock.
+	item, ok := s.byID[itemID]
+	if !ok {
+		return ErrUnknownItem
+	}
+	if _, err := item.Score(r); err != nil {
+		return fmt.Errorf("%w: %v", ErrBadResponse, err)
+	}
+
+	// The status check and the write share one lock, so a Submit cannot land
+	// between them.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.sessions[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if a.session.Status == StatusSubmitted {
+		return ErrAlreadyDone
+	}
+	a.responses[itemID] = cloneResponses(r)
+	return nil
 }
 
 // Get returns the session with the given ID, or ErrNotFound.

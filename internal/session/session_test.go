@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,5 +154,139 @@ func TestGetUnknownID(t *testing.T) {
 	_, err := s.Get("no-such-session")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCloneResponses(t *testing.T) {
+	// Each case builds its input with a function, so the test can call it
+	// twice: once for the input to clone and mutate, once for the value the
+	// clone must still equal.
+	tests := []struct {
+		name string
+		in   func() qti.Responses
+	}{
+		{"nil", func() qti.Responses { return nil }},
+		{"empty", func() qti.Responses { return qti.Responses{} }},
+		{"key with no values", func() qti.Responses { return qti.Responses{"RESPONSE": {}} }},
+		{"one key", func() qti.Responses { return qti.Responses{"RESPONSE": {"B"}} }},
+		{"several keys", func() qti.Responses {
+			return qti.Responses{"RESPONSE": {"A", "C", "D"}, "RESPONSE_2": {"itasca"}}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := tt.in()
+			got := cloneResponses(in)
+			want := tt.in()
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("cloneResponses = %#v, want %#v", got, want)
+			}
+
+			if in == nil {
+				return // nothing to mutate
+			}
+			for _, values := range in {
+				if len(values) > 0 {
+					values[0] = "changed"
+				}
+			}
+			in["ADDED"] = []string{"X"}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("after changing the input, clone = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestAnswerErrors(t *testing.T) {
+	s := newTestStore(t)
+	started, err := s.Start("cand-1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		sessionID  string
+		itemID     string
+		responses  qti.Responses
+		wantErr    error
+		wantDetail string // part of Score's message that must survive wrapping
+	}{
+		{
+			name:      "unknown session",
+			sessionID: "no-such-session",
+			itemID:    "capital-mn",
+			responses: qti.Responses{"RESPONSE": {"B"}},
+			wantErr:   ErrNotFound,
+		},
+		{
+			name:      "unknown item",
+			sessionID: started.ID,
+			itemID:    "no-such-item",
+			responses: qti.Responses{"RESPONSE": {"B"}},
+			wantErr:   ErrUnknownItem,
+		},
+		{
+			// Item checks come before the session lookup.
+			name:      "unknown item on unknown session",
+			sessionID: "no-such-session",
+			itemID:    "no-such-item",
+			responses: qti.Responses{"RESPONSE": {"B"}},
+			wantErr:   ErrUnknownItem,
+		},
+		{
+			name:       "undeclared response",
+			sessionID:  started.ID,
+			itemID:     "capital-mn",
+			responses:  qti.Responses{"RESPONS": {"B"}},
+			wantErr:    ErrBadResponse,
+			wantDetail: `unknown response "RESPONS"`,
+		},
+		{
+			name:       "two values for a single-answer choice",
+			sessionID:  started.ID,
+			itemID:     "capital-mn",
+			responses:  qti.Responses{"RESPONSE": {"B", "A"}},
+			wantErr:    ErrBadResponse,
+			wantDetail: `response "RESPONSE" takes one value, got 2`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.Answer(tt.sessionID, tt.itemID, tt.responses)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Answer error = %v, want %v", err, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Errorf("Answer error = %q, want it to contain %q", err, tt.wantDetail)
+			}
+		})
+	}
+}
+
+func TestAnswerAccepts(t *testing.T) {
+	s := newTestStore(t)
+	started, err := s.Start("cand-1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	tests := []struct {
+		itemID    string
+		responses qti.Responses
+	}{
+		{"capital-mn", qti.Responses{"RESPONSE": {"B"}}},
+		{"primes", qti.Responses{"RESPONSE": {"A", "C", "D"}}},
+		{"lake-source", qti.Responses{"RESPONSE": {"itasca"}}},
+		{"capital-mn", qti.Responses{}}, // blank answer, which Score accepts
+	}
+
+	for _, tt := range tests {
+		if err := s.Answer(started.ID, tt.itemID, tt.responses); err != nil {
+			t.Errorf("Answer(%s, %v) = %v, want nil", tt.itemID, tt.responses, err)
+		}
 	}
 }

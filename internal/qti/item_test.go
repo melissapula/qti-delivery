@@ -1,6 +1,7 @@
 package qti
 
 import (
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"slices"
@@ -153,10 +154,8 @@ func TestParseTextEntryInteraction(t *testing.T) {
 	}
 	p := item.Body.Paragraphs[0]
 
-	for _, want := range []string{"The Mississippi River begins at Lake", "in northern Minnesota."} {
-		if !strings.Contains(p.Text, want) {
-			t.Errorf("paragraph text %q does not contain %q", p.Text, want)
-		}
+	if got, want := squeeze(p.Text), "The Mississippi River begins at Lake {{RESPONSE}} in northern Minnesota."; got != want {
+		t.Errorf("paragraph text = %q, want %q", got, want)
 	}
 	if len(p.TextEntries) != 1 {
 		t.Fatalf("got %d text entries, want 1", len(p.TextEntries))
@@ -439,5 +438,74 @@ func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func TestParseParagraph(t *testing.T) {
+	tests := []struct {
+		name    string
+		xml     string
+		text    string // after squeeze
+		entries []TextEntryInteraction
+	}{
+		{
+			name: "plain text",
+			xml:  "<p>Hello\n   world</p>",
+			text: "Hello world",
+		},
+		{
+			name:    "one blank",
+			xml:     `<p>begins at Lake <qti-text-entry-interaction response-identifier="RESPONSE" expected-length="15"/> in Minnesota.</p>`,
+			text:    "begins at Lake {{RESPONSE}} in Minnesota.",
+			entries: []TextEntryInteraction{{ResponseIdentifier: "RESPONSE", ExpectedLength: 15}},
+		},
+		{
+			name: "two blanks",
+			xml:  `<p>A <qti-text-entry-interaction response-identifier="R1"/> and B <qti-text-entry-interaction response-identifier="R2" expected-length="5"/>.</p>`,
+			text: "A {{R1}} and B {{R2}}.",
+			entries: []TextEntryInteraction{
+				{ResponseIdentifier: "R1"},
+				{ResponseIdentifier: "R2", ExpectedLength: 5},
+			},
+		},
+		{
+			name: "inline formatting keeps its text",
+			xml:  `<p>The <strong>Mississippi</strong> River</p>`,
+			text: "The Mississippi River",
+		},
+		{
+			name:    "blank inside formatting",
+			xml:     `<p><em>Lake <qti-text-entry-interaction response-identifier="RESPONSE"/></em> today</p>`,
+			text:    "Lake {{RESPONSE}} today",
+			entries: []TextEntryInteraction{{ResponseIdentifier: "RESPONSE"}},
+		},
+		{
+			name:    "blank with no spaces around it",
+			xml:     `<p>x<qti-text-entry-interaction response-identifier="R"/>y</p>`,
+			text:    "x{{R}}y",
+			entries: []TextEntryInteraction{{ResponseIdentifier: "R"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var p Paragraph
+			if err := xml.Unmarshal([]byte(tt.xml), &p); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if got := squeeze(p.Text); got != tt.text {
+				t.Errorf("text = %q, want %q", got, tt.text)
+			}
+			if !slices.Equal(p.TextEntries, tt.entries) {
+				t.Errorf("TextEntries = %+v, want %+v", p.TextEntries, tt.entries)
+			}
+		})
+	}
+}
+
+func TestParseParagraphMalformed(t *testing.T) {
+	var p Paragraph
+	if err := xml.Unmarshal([]byte("<p>never closed"), &p); err == nil {
+		t.Errorf("Unmarshal succeeded with text %q, want error", p.Text)
 	}
 }

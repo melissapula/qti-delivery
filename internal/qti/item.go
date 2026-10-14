@@ -55,10 +55,49 @@ type ItemBody struct {
 }
 
 // Paragraph is a block of stimulus text, which may contain inline text entry
-// interactions.
+// interactions. Text holds a {{response-identifier}} marker where each
+// interaction sits, so a candidate view can show the blank in place.
 type Paragraph struct {
-	Text        string                 `xml:",chardata"`
-	TextEntries []TextEntryInteraction `xml:"qti-text-entry-interaction"`
+	Text        string
+	TextEntries []TextEntryInteraction
+}
+
+// UnmarshalXML reads a <p> element, keeping the text of any inline
+// formatting such as <strong>, and replacing each text entry interaction
+// with a marker in the text. encoding/xml calls it in place of decoding the
+// struct from tags.
+func (p *Paragraph) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var text strings.Builder
+	depth := 0 // how many inline elements inside the <p> are open
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return err
+		}
+
+		switch t := tok.(type) {
+		case xml.CharData:
+			text.Write(t)
+		case xml.StartElement:
+			if t.Name.Local != "qti-text-entry-interaction" {
+				depth++
+				continue
+			}
+			var entry TextEntryInteraction
+			if err := d.DecodeElement(&entry, &t); err != nil {
+				return err
+			}
+			p.TextEntries = append(p.TextEntries, entry)
+			fmt.Fprintf(&text, "{{%s}}", entry.ResponseIdentifier)
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+				continue
+			}
+			p.Text = text.String()
+			return nil
+		}
+	}
 }
 
 // ChoiceInteraction is a multiple-choice question. MaxChoices is 1 for a

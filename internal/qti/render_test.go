@@ -250,3 +250,138 @@ func TestViewCopiesMaxChoices(t *testing.T) {
 		t.Errorf("item MaxChoices = %d after changing the view, want 1", got)
 	}
 }
+
+// viewKeys is every JSON key a View may contain. A key outside this set means
+// a field was added to the view, which must be a deliberate test change.
+var viewKeys = map[string]bool{
+	"identifier":         true,
+	"title":              true,
+	"paragraphs":         true,
+	"interactions":       true,
+	"type":               true,
+	"responseIdentifier": true,
+	"prompt":             true,
+	"maxChoices":         true,
+	"choices":            true,
+	"text":               true,
+	"expectedLength":     true,
+}
+
+// collectKeys adds every object key in v, at every depth, to keys. v is a
+// value decoded by encoding/json into an any.
+func collectKeys(v any, keys map[string]bool) {
+	switch v := v.(type) {
+	case map[string]any:
+		for k, child := range v {
+			keys[k] = true
+			collectKeys(child, keys)
+		}
+	case []any:
+		for _, child := range v {
+			collectKeys(child, keys)
+		}
+	}
+}
+
+// sentinelItem has answers made of strings and numbers that appear nowhere
+// else in the item: not as choice identifiers, not in the text. If any of them
+// shows up in the view's JSON, it can only have come from the response
+// declarations.
+const sentinelItem = `<qti-assessment-item identifier="sentinel" title="Sentinel">
+  <qti-response-declaration identifier="CHOICE" cardinality="multiple" base-type="identifier">
+    <qti-correct-response><qti-value>SECRET-CORRECT-1</qti-value></qti-correct-response>
+    <qti-mapping lower-bound="-9.75" upper-bound="42.5" default-value="0.125">
+      <qti-map-entry map-key="SECRET-KEY-1" mapped-value="7.25"/>
+      <qti-map-entry map-key="SECRET-KEY-2" mapped-value="-3.5"/>
+    </qti-mapping>
+  </qti-response-declaration>
+  <qti-response-declaration identifier="TEXT" cardinality="single" base-type="string">
+    <qti-correct-response><qti-value>SECRET-CORRECT-2</qti-value></qti-correct-response>
+    <qti-mapping default-value="0">
+      <qti-map-entry map-key="SECRET-KEY-3" mapped-value="6.5" case-sensitive="false"/>
+    </qti-mapping>
+  </qti-response-declaration>
+  <qti-item-body>
+    <p>Fill in <qti-text-entry-interaction response-identifier="TEXT" expected-length="20"/> here.</p>
+    <qti-choice-interaction response-identifier="CHOICE" max-choices="0">
+      <qti-prompt>Pick any.</qti-prompt>
+      <qti-simple-choice identifier="A">Alpha</qti-simple-choice>
+      <qti-simple-choice identifier="B">Beta</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+  <qti-response-processing template="map_response"/>
+</qti-assessment-item>`
+
+// TestViewDoesNotLeakAnswers is a security test. The view is sent to the
+// candidate's browser, where anything in the payload can be read in the
+// developer tools, so a correct response or mapping in it would hand the
+// answers to anyone who looks. In high-stakes testing that invalidates the
+// result for every candidate who saw the item, not only the one who looked.
+//
+// Searching the samples for their correct answers is not enough on its own:
+// a choice item's correct answer, such as "B", is also a choice identifier
+// the candidate must see. So the test checks two things: that the JSON holds
+// no key outside the known view fields, and that a sentinel item's secrets,
+// which appear nowhere else, never reach the JSON.
+func TestViewDoesNotLeakAnswers(t *testing.T) {
+	samples := []struct {
+		file string
+		// secrets appear only in the item's response declaration, so they
+		// can be searched for safely.
+		secrets []string
+	}{
+		{file: "01-capital.xml"},
+		{file: "02-primes.xml"},
+		{file: "03-lake.xml", secrets: []string{"Itasca", "Lake Itasca"}},
+	}
+
+	for _, tt := range samples {
+		t.Run(tt.file, func(t *testing.T) {
+			item, err := ParseFile(filepath.Join(itemsDir, tt.file))
+			if err != nil {
+				t.Fatalf("ParseFile: %v", err)
+			}
+			checkNoLeak(t, item, tt.secrets)
+		})
+	}
+
+	t.Run("sentinel", func(t *testing.T) {
+		item, err := Parse(strings.NewReader(sentinelItem))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		checkNoLeak(t, item, []string{
+			"SECRET-CORRECT-1", "SECRET-CORRECT-2",
+			"SECRET-KEY-1", "SECRET-KEY-2", "SECRET-KEY-3",
+			"7.25", "-3.5", "6.5", "42.5", "-9.75", "0.125",
+		})
+	})
+}
+
+// checkNoLeak marshals the item's view and fails if the JSON holds a key
+// outside viewKeys or contains any of secrets.
+func checkNoLeak(t *testing.T, item *Item, secrets []string) {
+	t.Helper()
+	b, err := json.Marshal(item.View())
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded any
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	keys := make(map[string]bool)
+	collectKeys(decoded, keys)
+	for k := range keys {
+		if !viewKeys[k] {
+			t.Errorf("view JSON has unexpected key %q:\n%s", k, b)
+		}
+	}
+
+	for _, s := range secrets {
+		if strings.Contains(string(b), s) {
+			t.Errorf("view JSON contains secret %q:\n%s", s, b)
+		}
+	}
+}

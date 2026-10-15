@@ -101,7 +101,7 @@ qti-delivery/
 Each milestone ends with `go test ./...` passing and a pause for my review.
 
 ### Milestone 0: Setup
-- Install Go 1.22 or newer from https://go.dev/dl/ and check it with `go version`.
+- Install Go 1.27.2 or newer from https://go.dev/dl/ and check it with `go version`.
 - Install the official **Go extension for VS Code** (`golang.go`) and let it install `gopls`.
 - `go mod init github.com/melissapula/qti-delivery`
 - `git init`, plus a `.gitignore` for binaries.
@@ -326,4 +326,4 @@ On Windows PowerShell, use `curl.exe` instead of `curl`, or use `Invoke-RestMeth
 - [x] Milestone 3: Candidate view
 - [x] Milestone 4: Sessions
 - [x] Milestone 5: HTTP API
-- [ ] Milestone 6: Polish and publish
+- [x] Milestone 6: Polish and publish

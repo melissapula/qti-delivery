@@ -22,16 +22,22 @@ const itemsDir = "../../testdata/items"
 // the test server.
 const baseURL = "http://qti.test"
 
-// newTestAPI serves the API over the sample form on an in-memory test server
-// and returns a client for it. The server shuts down when the test ends.
-func newTestAPI(t *testing.T) *http.Client {
+// newTestStore returns an empty session store over the sample form.
+func newTestStore(t *testing.T) *session.Store {
 	t.Helper()
 	items, err := qti.LoadDir(itemsDir)
 	if err != nil {
 		t.Fatalf("LoadDir: %v", err)
 	}
+	return session.NewStore(items)
+}
+
+// newTestAPI serves the API over the sample form on an in-memory test server
+// and returns a client for it. The server shuts down when the test ends.
+func newTestAPI(t *testing.T) *http.Client {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return httptest.NewTestServer(t, New(session.NewStore(items), log)).Client()
+	return httptest.NewTestServer(t, New(newTestStore(t), log)).Client()
 }
 
 // do sends a request with an optional body and returns the response with its

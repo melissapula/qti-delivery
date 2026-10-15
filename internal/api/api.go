@@ -18,9 +18,10 @@ type server struct {
 	log   *slog.Logger
 }
 
-// New returns the API's HTTP handler over store, logging to log. Paths the
-// API does not serve, and wrong methods on paths it does, get ServeMux's own
-// plain-text 404 and 405 responses rather than JSON.
+// New returns the API's HTTP handler over store, logging every request and
+// any server error to log. Paths the API does not serve, and wrong methods on
+// paths it does, get ServeMux's own plain-text 404 and 405 responses rather
+// than JSON.
 func New(store *session.Store, log *slog.Logger) http.Handler {
 	s := &server{store: store, log: log}
 	mux := http.NewServeMux()
@@ -31,7 +32,7 @@ func New(store *session.Store, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/items/{index}", s.getItem)
 	mux.HandleFunc("PUT /api/sessions/{id}/responses/{itemId}", s.putResponse)
 	mux.HandleFunc("POST /api/sessions/{id}/submit", s.submit)
-	return mux
+	return logRequests(log, mux)
 }
 
 // healthz reports that the server is up.

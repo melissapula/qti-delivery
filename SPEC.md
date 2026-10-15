@@ -308,7 +308,7 @@ curl -s -X POST localhost:8080/api/sessions/<SESSION>/submit
 # → results: score 5 of maxScore 5
 ```
 
-On Windows PowerShell, use `curl.exe` instead of `curl`, or use `Invoke-RestMethod`.
+On Windows PowerShell 5.1, use `Invoke-RestMethod` with the full `http://` URL rather than `curl.exe`, which strips the double quotes inside JSON arguments. The README has a PowerShell version of this session.
 
 ---
 

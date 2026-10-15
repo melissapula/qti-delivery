@@ -159,8 +159,8 @@ func TestRunErrors(t *testing.T) {
 // connection open by sending its headers slowly.
 func TestNewServer(t *testing.T) {
 	srv := newServer(http.NotFoundHandler())
-	if srv.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("ReadHeaderTimeout = %v, want 5s", srv.ReadHeaderTimeout)
+	if srv.ReadHeaderTimeout != 6*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want 6s", srv.ReadHeaderTimeout)
 	}
 	if srv.Handler == nil {
 		t.Error("Handler is nil, want the handler passed in")

@@ -1,0 +1,28 @@
+# CI runs the same checks as the Makefile on every push to any branch.
+name: CI
+
+on: push
+
+# The job only reads the code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The Go version comes from go.mod, so there is no second copy to keep
+      # in sync. Caching is off so every run builds and tests from scratch
+      # instead of reporting cached test results.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Lint (gofmt, go vet)
+        run: make lint
+
+      - name: Test with the race detector
+        run: make race

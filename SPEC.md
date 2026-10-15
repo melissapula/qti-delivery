@@ -325,5 +325,5 @@ On Windows PowerShell, use `curl.exe` instead of `curl`, or use `Invoke-RestMeth
 - [x] Milestone 2: Scoring
 - [x] Milestone 3: Candidate view
 - [x] Milestone 4: Sessions
-- [ ] Milestone 5: HTTP API
+- [x] Milestone 5: HTTP API
 - [ ] Milestone 6: Polish and publish

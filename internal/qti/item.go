@@ -100,19 +100,79 @@ func (p *Paragraph) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	}
 }
 
+// readText reads the rest of the current element, up to and including its
+// end tag, and returns all of the text inside it, at every depth. The text of
+// inline formatting such as <strong> is kept; the tags themselves are
+// dropped. Call it from an UnmarshalXML method, after the start element.
+func readText(d *xml.Decoder) (string, error) {
+	var text strings.Builder
+	depth := 0 // how many elements inside the current one are open
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return "", err
+		}
+
+		switch t := tok.(type) {
+		case xml.CharData:
+			text.Write(t)
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			if depth == 0 {
+				return text.String(), nil
+			}
+			depth--
+		}
+	}
+}
+
+// InlineText is element text that may contain inline formatting, such as a
+// prompt that says "<strong>not</strong>". Decoding it keeps the text of
+// nested elements, which a plain string field would silently drop.
+type InlineText string
+
+// UnmarshalXML reads the element's text, including the text of any nested
+// elements. encoding/xml calls it in place of decoding a plain string.
+func (t *InlineText) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	text, err := readText(d)
+	if err != nil {
+		return err
+	}
+	*t = InlineText(text)
+	return nil
+}
+
 // ChoiceInteraction is a multiple-choice question. MaxChoices is 1 for a
 // single answer and 0 for no limit.
 type ChoiceInteraction struct {
 	ResponseIdentifier string         `xml:"response-identifier,attr"`
 	MaxChoices         int            `xml:"max-choices,attr"`
-	Prompt             string         `xml:"qti-prompt"`
+	Prompt             InlineText     `xml:"qti-prompt"`
 	Choices            []SimpleChoice `xml:"qti-simple-choice"`
 }
 
-// SimpleChoice is one option in a ChoiceInteraction.
+// SimpleChoice is one option in a ChoiceInteraction. Text keeps the text of
+// any inline formatting inside the choice.
 type SimpleChoice struct {
-	Identifier string `xml:"identifier,attr"`
-	Text       string `xml:",chardata"`
+	Identifier string
+	Text       string
+}
+
+// UnmarshalXML reads a <qti-simple-choice> element's identifier attribute and
+// its text, including the text of any nested elements.
+func (c *SimpleChoice) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	for _, a := range start.Attr {
+		if a.Name.Local == "identifier" {
+			c.Identifier = a.Value
+		}
+	}
+	text, err := readText(d)
+	if err != nil {
+		return err
+	}
+	c.Text = text
+	return nil
 }
 
 // TextEntryInteraction is a short typed answer.

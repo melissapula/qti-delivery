@@ -2,6 +2,7 @@ package qti
 
 import (
 	"encoding/xml"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -130,7 +131,7 @@ func TestParseChoiceInteraction(t *testing.T) {
 	if ci.MaxChoices != 1 {
 		t.Errorf("MaxChoices = %d, want 1", ci.MaxChoices)
 	}
-	if want := "What is the capital of Minnesota?"; ci.Prompt != want {
+	if want := InlineText("What is the capital of Minnesota?"); ci.Prompt != want {
 		t.Errorf("Prompt = %q, want %q", ci.Prompt, want)
 	}
 	want := []SimpleChoice{
@@ -507,5 +508,99 @@ func TestParseParagraphMalformed(t *testing.T) {
 	var p Paragraph
 	if err := xml.Unmarshal([]byte("<p>never closed"), &p); err == nil {
 		t.Errorf("Unmarshal succeeded with text %q, want error", p.Text)
+	}
+}
+
+func TestParseInlineText(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+		text string // after squeeze
+	}{
+		{
+			name: "plain text",
+			xml:  "<qti-prompt>Pick\n   one.</qti-prompt>",
+			text: "Pick one.",
+		},
+		{
+			name: "formatting in the middle",
+			xml:  "<qti-prompt>Which number is <strong>not</strong> prime?</qti-prompt>",
+			text: "Which number is not prime?",
+		},
+		{
+			name: "nested formatting",
+			xml:  "<qti-prompt>A <em>very <strong>big</strong> lake</em> here</qti-prompt>",
+			text: "A very big lake here",
+		},
+		{
+			name: "only formatted text",
+			xml:  "<qti-prompt><em>2</em></qti-prompt>",
+			text: "2",
+		},
+		{
+			name: "empty",
+			xml:  "<qti-prompt/>",
+			text: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got InlineText
+			if err := xml.Unmarshal([]byte(tt.xml), &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if s := squeeze(string(got)); s != tt.text {
+				t.Errorf("text = %q, want %q", s, tt.text)
+			}
+		})
+	}
+}
+
+// TestParseInlineTextMalformed checks for the syntax error itself. If
+// readText dropped it, encoding/xml would still fail, but with a vaguer
+// "did not consume entire element" error that hides the cause.
+func TestParseInlineTextMalformed(t *testing.T) {
+	var got InlineText
+	err := xml.Unmarshal([]byte("<qti-prompt>never <em>closed</em>"), &got)
+	if _, ok := errors.AsType[*xml.SyntaxError](err); !ok {
+		t.Errorf("Unmarshal error = %v, want *xml.SyntaxError", err)
+	}
+}
+
+func TestParseSimpleChoice(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+		want SimpleChoice // Text after squeeze
+	}{
+		{
+			name: "plain text",
+			xml:  `<qti-simple-choice identifier="A">Saint Paul</qti-simple-choice>`,
+			want: SimpleChoice{Identifier: "A", Text: "Saint Paul"},
+		},
+		{
+			name: "only formatted text",
+			xml:  `<qti-simple-choice identifier="A"><em>2</em></qti-simple-choice>`,
+			want: SimpleChoice{Identifier: "A", Text: "2"},
+		},
+		{
+			name: "formatting in the middle",
+			xml:  `<qti-simple-choice identifier="B">Lake <strong>Itasca</strong> State Park</qti-simple-choice>`,
+			want: SimpleChoice{Identifier: "B", Text: "Lake Itasca State Park"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got SimpleChoice
+			if err := xml.Unmarshal([]byte(tt.xml), &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			got.Text = squeeze(got.Text)
+			if got != tt.want {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

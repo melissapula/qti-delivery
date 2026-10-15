@@ -79,7 +79,7 @@ func (it *Item) View() View {
 		v.Interactions = append(v.Interactions, InteractionView{
 			Type:               interactionChoice,
 			ResponseIdentifier: ci.ResponseIdentifier,
-			Prompt:             squeeze(ci.Prompt),
+			Prompt:             squeeze(string(ci.Prompt)),
 			MaxChoices:         &maxChoices,
 			Choices:            choices,
 		})

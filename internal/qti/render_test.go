@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -233,6 +234,38 @@ func TestViewSqueezesText(t *testing.T) {
 	}
 	if want := "First choice"; iv.Choices[0].Text != want {
 		t.Errorf("Choices[0].Text = %q, want %q", iv.Choices[0].Text, want)
+	}
+}
+
+// TestViewKeepsInlineText covers prompts and choices with inline formatting,
+// which none of the samples has. Dropping the formatted text can reverse a
+// question's meaning, as "not" would here.
+func TestViewKeepsInlineText(t *testing.T) {
+	const src = `<qti-assessment-item identifier="inline" title="Inline">
+  <qti-response-declaration identifier="RESPONSE" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>B</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="RESPONSE" max-choices="1">
+      <qti-prompt>Which number is <strong>not</strong> prime?</qti-prompt>
+      <qti-simple-choice identifier="A"><em>2</em></qti-simple-choice>
+      <qti-simple-choice identifier="B">9</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+  <qti-response-processing template="match_correct"/>
+</qti-assessment-item>`
+
+	item, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	iv := item.View().Interactions[0]
+	if want := "Which number is not prime?"; iv.Prompt != want {
+		t.Errorf("Prompt = %q, want %q", iv.Prompt, want)
+	}
+	want := []ChoiceView{{Identifier: "A", Text: "2"}, {Identifier: "B", Text: "9"}}
+	if !slices.Equal(iv.Choices, want) {
+		t.Errorf("Choices = %+v, want %+v", iv.Choices, want)
 	}
 }
 
